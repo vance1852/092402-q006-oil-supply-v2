@@ -1,5 +1,6 @@
-"""油气供应韧性与调度领域包。"""
+"""油气供应领域包。"""
 
+from .gasoline import GasolineService
 from .service import SupplyService
 
-__all__ = ["SupplyService"]
+__all__ = ["SupplyService", "GasolineService"]

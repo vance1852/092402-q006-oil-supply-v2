@@ -194,6 +194,99 @@ CREATE TABLE IF NOT EXISTS supply_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_supply_audit_entity
 ON supply_audit_events(entity_type, entity_id, event_id);
+
+CREATE TABLE IF NOT EXISTS gasoline_price_strategies (
+    strategy_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    price_indexes_json TEXT NOT NULL,
+    baseline_92 TEXT NOT NULL,
+    baseline_95 TEXT NOT NULL,
+    baseline_anchor_date TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'draft'
+        CHECK(state IN ('draft','in_review','scheduled','active','retired')),
+    effective_from TEXT,
+    effective_to TEXT,
+    scheduled_publish_at TEXT,
+    published_at TEXT,
+    retired_at TEXT,
+    current_rule_version_id INTEGER,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL REFERENCES supply_users(user_id),
+    created_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL REFERENCES supply_users(user_id),
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gasoline_one_active
+ON gasoline_price_strategies((1)) WHERE state='active';
+
+CREATE TABLE IF NOT EXISTS gasoline_rule_versions (
+    rule_version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id TEXT NOT NULL REFERENCES gasoline_price_strategies(strategy_id),
+    effective_from TEXT NOT NULL,
+    effective_to TEXT,
+    rule_json TEXT NOT NULL,
+    rule_sha256 TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES supply_users(user_id),
+    created_at TEXT NOT NULL,
+    UNIQUE(strategy_id, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gasoline_rules_interval
+ON gasoline_rule_versions(strategy_id, effective_from, effective_to);
+
+CREATE TABLE IF NOT EXISTS gasoline_decisions (
+    decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id TEXT NOT NULL REFERENCES gasoline_price_strategies(strategy_id),
+    anchor_date TEXT NOT NULL,
+    rule_version_id INTEGER NOT NULL REFERENCES gasoline_rule_versions(rule_version_id),
+    rule_sha256 TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL UNIQUE,
+    result_json TEXT NOT NULL,
+    carry_in_json TEXT NOT NULL,
+    carry_out_json TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'preview'
+        CHECK(state IN ('preview','published','superseded')),
+    mode TEXT NOT NULL DEFAULT 'manual' CHECK(mode IN ('manual','scheduled')),
+    created_by TEXT NOT NULL REFERENCES supply_users(user_id),
+    created_at TEXT NOT NULL,
+    published_by TEXT REFERENCES supply_users(user_id),
+    published_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gasoline_published_anchor
+ON gasoline_decisions(strategy_id, anchor_date) WHERE state='published';
+
+CREATE INDEX IF NOT EXISTS idx_gasoline_decisions_anchor
+ON gasoline_decisions(strategy_id, anchor_date, state);
+
+CREATE TABLE IF NOT EXISTS gasoline_decision_quotes (
+    decision_id INTEGER NOT NULL REFERENCES gasoline_decisions(decision_id),
+    price_index TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    quote_id INTEGER NOT NULL REFERENCES price_index_quotes(quote_id),
+    close_usd TEXT NOT NULL,
+    PRIMARY KEY(decision_id, price_index, trade_date)
+);
+
+CREATE TABLE IF NOT EXISTS gasoline_quote_corrections (
+    correction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    price_index TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    old_quote_id INTEGER NOT NULL REFERENCES price_index_quotes(quote_id),
+    new_quote_id INTEGER NOT NULL REFERENCES price_index_quotes(quote_id),
+    old_close_usd TEXT NOT NULL,
+    new_close_usd TEXT NOT NULL,
+    source_revision TEXT NOT NULL,
+    affected_state TEXT NOT NULL DEFAULT 'pending'
+        CHECK(affected_state IN ('pending','reviewed','resolved')),
+    affected_decision_ids_json TEXT NOT NULL,
+    recalc_suggestion_json TEXT NOT NULL,
+    noted_by TEXT NOT NULL REFERENCES supply_users(user_id),
+    noted_at TEXT NOT NULL,
+    resolved_at TEXT,
+    UNIQUE(new_quote_id)
+);
 """
 
 

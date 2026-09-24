@@ -12,11 +12,20 @@
 - 供应情景保存价格变化、线路能力变化和需求变化，审批后产生可重放的确定性结果；
 - 关键写操作进入哈希串联审计日志，可离线验证事件顺序和内容完整性。
 
+汽油指导价子域（92/95 号汽油）在同一套权限与审计设施上提供完整调价策略流程：
+
+- 策略按 **草稿 → 复核 → 定时生效 → 退役** 推进，支持复核驳回回草稿；同一时刻最多一个生效中策略；
+- 政策规则（原油篮子权重、调整周期交易日数、最低变动门槛、增值税率、定额消费税、加工价差、折算系数、暂缓上下限、跨周期累计开关）按生效日整体快照保存，区间左闭右开、互不重叠，计算只引用锚定日生效的版本，不能用今天的规则重算去年的决定；
+- 调价决定锁定窗口内每个交易日当时的报价修订（quote_id）与规则哈希；运营人员可预览任意锚定日结果而不落账、不写审计；
+- 正式发布生成不可变决定，输入哈希唯一，重复发布返回同一条记录，且必须按锚定日顺序发布；
+- 四舍五入统一为 ROUND_HALF_UP 到分；低于门槛暂缓时未调金额可跨周期累计，触发调控上下限时按政策口径暂缓或累计；
+- 后续报价更正只产生更正标记，列出直接受影响决定并给出级联重算建议（绝不静默改写历史），标记可由风险角色复核/结案。
+
 现场准入子域位于 `robot_trials` 包，负责油田巡检机器人的设备构建登记、不可变试验协议、观测分片导入、异常观测复核、统计任务租约、准入决定和审计报告。该子域不连接机器人硬件，只处理已经结构化的试验记录。
 
 ## 目录
 
-- `src/oil_supply/`：报价、设施、线路、库存、提名、供应情景、HTTP API 与离线验收；
+- `src/oil_supply/`：报价、设施、线路、库存、提名、供应情景、汽油调价策略、HTTP API 与离线验收；
 - `src/robot_trials/`：油田巡检机器人试验与统计准入；
 - `fixtures/`：现场准入演示协议和结构化观测；
 - `tests/`：核心规则、错误边界、API 和端到端验收测试。
@@ -68,3 +77,11 @@ PYTHONPATH=src python3 -m oil_supply.api --database oil_supply.sqlite3 --host 12
 ```
 
 健康检查为 `GET /health`。除健康检查外，请求通过 `X-Actor-Id` 携带操作者编号。可用接口覆盖报价、设施、线路、停运事件、库存批次、提名、能力分配、发运、供应情景和审计链。服务重启后，SQLite 中的业务状态和历史版本会继续保留。
+
+汽油调价接口前缀为 `/gasoline`：
+
+- `POST /gasoline/strategies` 建草稿；`POST /gasoline/strategies/{id}/rules` 增补政策规则版本（区间不重叠）；
+- `.../submit`、`.../approve`（带 `scheduled_publish_at`）、`.../reject`、`POST /gasoline/strategies/activate-due`、`.../retire`；
+- `POST .../preview` 预览不落账；`POST .../publish` 发布不可变决定（重复发布返回同一记录）；
+- `GET .../decisions` 与 `GET /gasoline/decisions/{id}` 查询；
+- `GET /gasoline/corrections`、`GET /gasoline/corrections/{id}/suggestion`、`POST /gasoline/corrections/{id}/resolve` 处理报价更正影响。

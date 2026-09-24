@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from .errors import SupplyError, ValidationFailed
+from .gasoline import GasolineService
 from .service import SupplyService
 from .storage import connect
 
@@ -83,6 +84,36 @@ class JsonApplication:
                 return Response(200, self.service.approve_scenario(actor, parts[1], int(payload["expected_revision"])))
             if method == "POST" and len(parts) == 3 and parts[0] == "scenarios" and parts[2] == "run":
                 return Response(200, self.service.run_scenario(actor, parts[1], payload["as_of_date"]))
+            if method == "POST" and path == "/gasoline/strategies":
+                return Response(201, self.service.create_gasoline_strategy(actor, payload))
+            if method == "POST" and len(parts) == 3 and parts[:2] == ["gasoline", "strategies"] and parts[2] == "activate-due":
+                return Response(200, self.service.activate_due_strategies(actor))
+            if method == "GET" and len(parts) == 3 and parts[:2] == ["gasoline", "strategies"]:
+                return Response(200, self.service.gasoline_strategy(parts[2], actor))
+            if method == "POST" and len(parts) == 4 and parts[0] == "gasoline" and parts[1] == "strategies" and parts[3] == "rules":
+                return Response(201, self.service.add_rule_version(actor, parts[2], payload["effective_from"], payload["rule"]))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "submit":
+                return Response(200, self.service.submit_strategy_for_review(actor, parts[2], int(payload["expected_revision"])))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "approve":
+                return Response(200, self.service.approve_strategy(actor, parts[2], int(payload["expected_revision"]), payload["scheduled_publish_at"]))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "reject":
+                return Response(200, self.service.reject_strategy(actor, parts[2], int(payload["expected_revision"]), payload["reason"]))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "retire":
+                return Response(200, self.service.retire_strategy(actor, parts[2], int(payload["expected_revision"])))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "preview":
+                return Response(200, self.service.preview_gasoline_decision(actor, parts[2], payload["anchor_date"]))
+            if method == "POST" and len(parts) == 4 and parts[:2] == ["gasoline", "strategies"] and parts[3] == "publish":
+                return Response(200, self.service.publish_gasoline_decision(actor, parts[2], payload["anchor_date"]))
+            if method == "GET" and len(parts) == 4 and parts[0] == "gasoline" and parts[1] == "strategies" and parts[3] == "decisions":
+                return Response(200, self.service.gasoline_decisions(parts[2], actor))
+            if method == "GET" and len(parts) == 3 and parts[:2] == ["gasoline", "decisions"]:
+                return Response(200, self.service.gasoline_decision(int(parts[2]), actor))
+            if method == "GET" and path == "/gasoline/corrections":
+                return Response(200, self.service.quote_corrections(actor))
+            if method == "GET" and len(parts) == 4 and parts[0] == "gasoline" and parts[1] == "corrections" and parts[3] == "suggestion":
+                return Response(200, self.service.recalculation_suggestion(actor, int(parts[2])))
+            if method == "POST" and len(parts) == 4 and parts[0] == "gasoline" and parts[1] == "corrections" and parts[3] == "resolve":
+                return Response(200, self.service.resolve_quote_correction(actor, int(parts[2]), payload["state"]))
             if method == "GET" and path == "/audit/chain":
                 return Response(200, self.service.audit_chain(actor))
             return Response(404, {"error": {"code": "route_not_found", "message": "接口不存在"}})
@@ -126,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args(argv)
     connection = connect(args.database)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(JsonApplication(SupplyService(connection))))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(JsonApplication(GasolineService(connection))))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
